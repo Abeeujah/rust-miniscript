@@ -38,26 +38,20 @@ fn construct_tap_witness(
     // When miniscript tries to finalize the PSBT, it doesn't have the full descriptor (which contained a pkh() fragment)
     // and instead resorts to parsing the raw script sig, which is translated into a "expr_raw_pkh" internally.
     let mut map: BTreeMap<hash160::Hash, bitcoin::key::XOnlyPublicKey> = BTreeMap::new();
-    let psbt_inputs = &sat.psbt.inputs;
-    for psbt_input in psbt_inputs {
+    sat.psbt.inputs.iter().for_each(|input| {
         // We need to satisfy or dissatisfy any given key. `tap_key_origin` is the only field of PSBT Input which consist of
         // all the keys added on a descriptor and thus we get keys from it.
-        let public_keys = psbt_input.tap_key_origins.keys();
-        for key in public_keys {
-            let bitcoin_key = *key;
-            let hash = bitcoin_key.to_pubkeyhash(SigType::Schnorr);
-            map.insert(hash, bitcoin_key);
-        }
-    }
+        input.tap_key_origins.keys().for_each(|key| {
+            map.insert(key.to_pubkeyhash(SigType::Schnorr), *key);
+        })
+    });
     assert!(spk.is_p2tr());
 
     // try the key spend path firsti
-    if let Some(ref key) = sat.psbt_input().tap_internal_key {
-        if let Some(sig) =
-            <PsbtInputSatisfier as Satisfier<XOnlyPublicKey>>::lookup_tap_key_spend_sig(sat, key)
-        {
-            return Ok(vec![sig.to_vec()]);
-        }
+    if let Some(sig) = sat.psbt_input().tap_internal_key.as_ref().and_then(|key| {
+        <PsbtInputSatisfier as Satisfier<XOnlyPublicKey>>::lookup_tap_key_spend_sig(sat, key)
+    }) {
+        return Ok(vec![sig.to_vec()]);
     }
     // Next script spends
     let (mut min_wit, mut min_wit_len) = (None, None);
@@ -283,17 +277,16 @@ pub fn interpreter_check<C: secp256k1::Verification>(
 ) -> Result<(), Error> {
     let utxos = prevouts(psbt)?;
     let utxos = &Prevouts::All(&utxos);
+    let empty_script_sig = ScriptBuf::new();
+    let empty_witness = Witness::default();
     for (index, input) in psbt.inputs.iter().enumerate() {
-        let empty_script_sig = ScriptBuf::new();
-        let empty_witness = Witness::default();
         let script_sig = input.final_script_sig.as_ref().unwrap_or(&empty_script_sig);
         let witness = input
             .final_script_witness
             .as_ref()
-            .map(|wit_slice| Witness::from_slice(&wit_slice.to_vec())) // TODO: Update rust-bitcoin psbt API to use witness
-            .unwrap_or(empty_witness);
+            .unwrap_or(&empty_witness);
 
-        interpreter_inp_check(psbt, secp, index, utxos, &witness, script_sig)?;
+        interpreter_inp_check(psbt, secp, index, utxos, witness, script_sig)?;
     }
     Ok(())
 }
@@ -430,16 +423,8 @@ pub(super) fn finalize_input<C: secp256k1::Verification>(
         let input = &mut psbt.inputs[index];
         input.non_witness_utxo = original.non_witness_utxo;
         input.witness_utxo = original.witness_utxo;
-        input.final_script_sig = if script_sig.is_empty() {
-            None
-        } else {
-            Some(script_sig)
-        };
-        input.final_script_witness = if witness.is_empty() {
-            None
-        } else {
-            Some(witness)
-        };
+        input.final_script_sig = (!script_sig.is_empty()).then_some(script_sig);
+        input.final_script_witness = (!witness.is_empty()).then_some(witness);
     }
 
     Ok(())
