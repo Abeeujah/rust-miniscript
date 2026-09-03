@@ -233,7 +233,7 @@ impl From<bitcoin::key::FromSliceError> for InputError {
     fn from(e: bitcoin::key::FromSliceError) -> Self { Self::KeyErr(e) }
 }
 
-/// Psbt satisfier for at inputs at a particular index.
+/// Psbt satisfier for inputs at a particular index.
 ///
 /// Holds a `&psbt` because multiple inputs may share
 /// the same psbt structure
