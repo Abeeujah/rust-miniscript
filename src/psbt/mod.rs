@@ -283,8 +283,9 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfier<'_> {
         self.psbt_input()
             .bip32_derivation
             .iter()
-            .find(|&(pubkey, _)| pubkey.to_pubkeyhash(SigType::Ecdsa) == *pkh)
-            .map(|(pubkey, _)| bitcoin::PublicKey::new(*pubkey))
+            .find_map(|(&pk, _)| {
+                (pk.to_pubkeyhash(SigType::Ecdsa) == *pkh).then_some(bitcoin::PublicKey::new(pk))
+            })
     }
 
     fn lookup_tap_control_block_map(
@@ -300,10 +301,9 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfier<'_> {
         self.psbt_input()
             .tap_script_sigs
             .iter()
-            .find(|&((pubkey, lh), _sig)| {
-                pubkey.to_pubkeyhash(SigType::Schnorr) == pkh.0 && *lh == pkh.1
+            .find_map(|(&(pk, lh), &sig)| {
+                (pk.to_pubkeyhash(SigType::Schnorr) == pkh.0 && lh == pkh.1).then_some((pk, sig))
             })
-            .map(|((x_only_pk, _leaf_hash), sig)| (*x_only_pk, *sig))
     }
 
     fn lookup_ecdsa_sig(&self, pk: &Pk) -> Option<bitcoin::ecdsa::Signature> {
@@ -320,8 +320,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfier<'_> {
         self.psbt_input()
             .partial_sigs
             .iter()
-            .find(|&(pubkey, _sig)| pubkey.to_pubkeyhash(SigType::Ecdsa) == *pkh)
-            .map(|(pk, sig)| (*pk, *sig))
+            .find_map(|(&pk, &sig)| (pk.to_pubkeyhash(SigType::Ecdsa) == *pkh).then_some((pk, sig)))
     }
 
     fn check_after(&self, n: absolute::LockTime) -> bool {
