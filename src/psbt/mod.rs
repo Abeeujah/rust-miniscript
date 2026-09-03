@@ -594,20 +594,10 @@ impl PsbtExt for Psbt {
         secp: &secp256k1::Secp256k1<C>,
     ) -> Result<(), Vec<Error>> {
         // Actually construct the witnesses
-        let mut errors = vec![];
-        for index in 0..self.inputs.len() {
-            match finalizer::finalize_input(self, index, secp, /*allow_mall*/ false) {
-                Ok(..) => {}
-                Err(e) => {
-                    errors.push(e);
-                }
-            }
-        }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        let errors = (0..self.inputs.len())
+            .filter_map(|i| finalizer::finalize_input(self, i, secp, /*allow_mall*/ false).err())
+            .collect::<Vec<Error>>();
+        errors.is_empty().then_some(()).ok_or(errors)
     }
 
     fn finalize<C: secp256k1::Verification>(
@@ -624,20 +614,10 @@ impl PsbtExt for Psbt {
         &mut self,
         secp: &secp256k1::Secp256k1<C>,
     ) -> Result<(), Vec<Error>> {
-        let mut errors = vec![];
-        for index in 0..self.inputs.len() {
-            match finalizer::finalize_input(self, index, secp, /*allow_mall*/ true) {
-                Ok(..) => {}
-                Err(e) => {
-                    errors.push(e);
-                }
-            }
-        }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        let errors = (0..self.inputs.len())
+            .filter_map(|i| finalizer::finalize_input(self, i, secp, /*allow_mall*/ true).err())
+            .collect::<Vec<Error>>();
+        errors.is_empty().then_some(()).ok_or(errors)
     }
 
     fn finalize_mall<C: secp256k1::Verification>(
