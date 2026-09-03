@@ -165,37 +165,26 @@ fn get_descriptor(psbt: &Psbt, index: usize) -> Result<Descriptor<PublicKey>, In
         }
     } else if script_pubkey.is_p2pkh() {
         // 2. `Pkh`: creates a `PkH` descriptor if partial_sigs has the corresponding pk
-        let partial_sig_contains_pk = inp.partial_sigs.iter().find(|&(&pk, _sig)| {
-            // Indirect way to check the equivalence of pubkey-hashes.
-            // Create a pubkey hash and check if they are the same.
-            // THIS IS A BUG AND *WILL* PRODUCE WRONG SATISFACTIONS FOR UNCOMPRESSED KEYS
-            // Partial sigs loses the compressed flag that is necessary
-            // TODO: See https://github.com/rust-bitcoin/rust-bitcoin/pull/836
-            // The type checker will fail again after we update to 0.28 and this can be removed
-            let addr = bitcoin::Address::p2pkh(pk, bitcoin::Network::Bitcoin);
-            *script_pubkey == addr.script_pubkey()
-        });
-        match partial_sig_contains_pk {
-            Some((pk, _sig)) => Descriptor::new_pkh(*pk).map_err(InputError::from),
-            None => Err(InputError::MissingPubkey),
-        }
+        let (pk, _) = inp
+            .partial_sigs
+            .iter()
+            .find(|&(pk, _sig)| script_pubkey.as_bytes()[3..23] == pk.pubkey_hash()[..])
+            .ok_or(InputError::MissingPubkey)?;
+        Descriptor::new_pkh(*pk).map_err(InputError::from)
     } else if script_pubkey.is_p2wpkh() {
         // 3. `Wpkh`: creates a `wpkh` descriptor if the partial sig has corresponding pk.
-        let partial_sig_contains_pk = inp.partial_sigs.iter().find(|&(&pk, _sig)| {
-            match bitcoin::key::CompressedPublicKey::try_from(pk) {
-                Ok(compressed) => {
-                    // Indirect way to check the equivalence of pubkey-hashes.
-                    // Create a pubkey hash and check if they are the same.
-                    let addr = bitcoin::Address::p2wpkh(&compressed, bitcoin::Network::Bitcoin);
-                    *script_pubkey == addr.script_pubkey()
-                }
-                Err(_) => false,
-            }
-        });
-        match partial_sig_contains_pk {
-            Some((pk, _sig)) => Ok(Descriptor::new_wpkh(*pk)?),
-            None => Err(InputError::MissingPubkey),
-        }
+        let (pk, _) = inp
+            .partial_sigs
+            .iter()
+            .find(|&(pk, _)| {
+                bitcoin::key::CompressedPublicKey::try_from(*pk)
+                    .map(|compressed| {
+                        compressed.pubkey_hash()[..] == script_pubkey.as_bytes()[2..22]
+                    })
+                    .unwrap_or(false)
+            })
+            .ok_or(InputError::MissingPubkey)?;
+        Descriptor::new_wpkh(*pk).map_err(InputError::from)
     } else if script_pubkey.is_p2wsh() {
         // 4. `Wsh`: creates a `Wsh` descriptor
         if inp.redeem_script.is_some() {
@@ -241,22 +230,18 @@ fn get_descriptor(psbt: &Psbt, index: usize) -> Result<Descriptor<PublicKey>, In
                     }
                 } else if redeem_script.is_p2wpkh() {
                     // 6. `ShWpkh` case
-                    let partial_sig_contains_pk = inp.partial_sigs.iter().find(|&(&pk, _sig)| {
-                        match bitcoin::key::CompressedPublicKey::try_from(pk) {
-                            Ok(compressed) => {
-                                let addr = bitcoin::Address::p2wpkh(
-                                    &compressed,
-                                    bitcoin::Network::Bitcoin,
-                                );
-                                *redeem_script == addr.script_pubkey()
-                            }
-                            Err(_) => false,
-                        }
-                    });
-                    match partial_sig_contains_pk {
-                        Some((pk, _sig)) => Ok(Descriptor::new_sh_wpkh(*pk)?),
-                        None => Err(InputError::MissingPubkey),
-                    }
+                    let (pk, _) = inp
+                        .partial_sigs
+                        .iter()
+                        .find(|&(&pk, _sig)| {
+                            bitcoin::key::CompressedPublicKey::try_from(pk)
+                                .map(|compressed| {
+                                    compressed.pubkey_hash()[..] == redeem_script.as_bytes()[2..22]
+                                })
+                                .unwrap_or(false)
+                        })
+                        .ok_or(InputError::MissingPubkey)?;
+                    Ok(Descriptor::new_sh_wpkh(*pk)?)
                 } else {
                     //7. regular p2sh
                     if inp.witness_script.is_some() {
